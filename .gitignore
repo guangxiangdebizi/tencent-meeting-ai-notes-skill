@@ -1,0 +1,12 @@
+output/
+腾讯会议整理输出/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*_realtime_notes.md
+*_实时纪要.md
+yang_realtime_notes*.*
+.DS_Store
+Thumbs.db
+
