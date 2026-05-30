@@ -28,7 +28,7 @@ public class W32Scroll {
 
 $wemeetProcessIds = @(Get-Process wemeetapp -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 if ($wemeetProcessIds.Count -eq 0) {
-    throw "No wemeetapp process found. Open Tencent Meeting and the target Yuanbao notes page first."
+    throw "未找到 wemeetapp 进程。请先打开腾讯会议和目标元宝纪要页面。"
 }
 
 $script:notesWindow = [IntPtr]::Zero
@@ -50,7 +50,7 @@ $callback = [W32Scroll+EnumWindowsProc]{
 
 [W32Scroll]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
 if ($script:notesWindow -eq [IntPtr]::Zero) {
-    throw "Yuanbao notes window not found. Open the target notes page and retry."
+    throw "未找到元宝纪要窗口。请打开目标纪要页面后重试。"
 }
 
 [W32Scroll]::ShowWindow($script:notesWindow, 9) | Out-Null
@@ -70,5 +70,4 @@ for ($i = 0; $i -lt $PageDownCount; $i++) {
 }
 
 Start-Sleep -Seconds 5
-Write-Host "Scrolled Yuanbao notes window with $PageDownCount Page Down events."
-
+Write-Host "已向元宝纪要窗口发送 $PageDownCount 次 Page Down。"

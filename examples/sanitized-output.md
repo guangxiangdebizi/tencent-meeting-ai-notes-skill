@@ -1,22 +1,22 @@
-# Example Meeting - Yuanbao Real-Time Notes
+# 示例会议 - 元宝实时纪要
 
-- Meeting time: 2026-05-21 20:00 - 21:54
-- Participants: Alice, Bob
-- Extracted at: 2026-05-24 23:59
-- Note count: 3
-- Extraction status: scan completed; no verified expected total was provided
+- 会议时间: 2026-05-21 20:00 - 21:54
+- 参会人: 张三, 李四
+- 提取时间: 2026-05-24 23:59
+- 纪要条数: 3
+- 提取状态: 已完成扫描；未提供已验证的预期总条数
 
 ---
 
-### [20:00] Note fragment 1
+### [20:00] 纪要片段 1
 
-Alice opened the meeting by confirming the product demo goals and the upcoming customer timeline.
+张三先确认了产品演示目标和后续客户沟通时间点。
 
-### [20:12] Note fragment 2
+### [20:12] 纪要片段 2
 
-The team discussed the difference between a basic configuration page and an AI-assisted mapping step. The important implementation point was that AI suggestions must still be confirmed by the user.
+团队讨论了基础配置页面和 AI 辅助映射步骤的区别。关键实现点是 AI 可以给出建议，但最终结果仍需要用户确认。
 
-### [21:30] Note fragment 3
+### [21:30] 纪要片段 3
 
-Bob summarized a research direction involving video-frame compression and explained why processing fewer image tokens could lower AI inference cost.
+李四总结了一个和视频帧压缩有关的研究方向，并解释了为什么减少图像 token 可以降低 AI 推理成本。
 

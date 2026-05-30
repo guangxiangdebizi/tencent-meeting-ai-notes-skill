@@ -227,35 +227,35 @@ foreach ($entry in $sortedNotes) {
         $timeLabel = "??:??"
     }
 
-    $formattedBlocks += "### [$timeLabel] Note fragment $noteNumber`n`n$decoded`n"
+    $formattedBlocks += "### [$timeLabel] 纪要片段 $noteNumber`n`n$decoded`n"
     $noteNumber++
 }
 
 $statusLine = if ($ExpectedNoteCount -gt 0) {
     if ($allNotes.Count -ge $ExpectedNoteCount) {
-        "- Extraction status: reached expected count"
+        "- 提取状态: 已达到预期条数"
     }
     else {
-        "- Extraction status: below expected count; reopen the Yuanbao notes page, scroll it fully, and rerun"
+        "- 提取状态: 未达到预期条数；请重新打开元宝纪要页面，完整滚动后再重跑"
     }
 }
 else {
-    "- Extraction status: scan completed; no verified expected total was provided"
+    "- 提取状态: 已完成扫描；未提供已验证的预期总条数"
 }
 
 $countLine = if ($ExpectedNoteCount -gt 0) {
-    "- Note count: $($allNotes.Count)/$ExpectedNoteCount"
+    "- 纪要条数: $($allNotes.Count)/$ExpectedNoteCount"
 }
 else {
-    "- Note count: $($allNotes.Count)"
+    "- 纪要条数: $($allNotes.Count)"
 }
 
 $header = @"
-# $MeetingTitle - Yuanbao Real-Time Notes
+# $MeetingTitle - 元宝实时纪要
 
-- Meeting time: $MeetingTimeRange
-- Participants: $Participants
-- Extracted at: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
+- 会议时间: $MeetingTimeRange
+- 参会人: $Participants
+- 提取时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
 $countLine
 $statusLine
 
@@ -271,12 +271,12 @@ if ($outputDir -and -not (Test-Path $outputDir)) {
 
 [System.IO.File]::WriteAllText($resolvedOutputFile, $header + ($formattedBlocks -join "`n"), [System.Text.UTF8Encoding]::new($false))
 
-Write-Host "Pass contributions:"
+Write-Host "各轮提取贡献:"
 Write-Host "  pass1(task_id proximity): $($passStats.pass1)"
 Write-Host "  pass2(note_insight_info blocks): $($passStats.pass2)"
 Write-Host "  pass3(render cache marker): $($passStats.pass3)"
-Write-Host "Saved $($allNotes.Count) notes to $resolvedOutputFile"
+Write-Host "已保存 $($allNotes.Count) 条纪要到 $resolvedOutputFile"
 
 if ($ExpectedNoteCount -gt 0 -and $allNotes.Count -lt $ExpectedNoteCount) {
-    Write-Warning "Only extracted $($allNotes.Count)/$ExpectedNoteCount notes. The remaining notes are likely not loaded in renderer memory yet."
+    Write-Warning "只提取到 $($allNotes.Count)/$ExpectedNoteCount 条。剩余内容可能尚未加载进渲染进程内存。"
 }

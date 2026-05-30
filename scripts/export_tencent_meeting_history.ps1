@@ -48,15 +48,14 @@ $allMeetings | Export-Csv -LiteralPath (Join-Path $outputMetaDir "all_meetings.c
 $meetingsWithSummary = @($allMeetings | Where-Object { $_.has_ai_summary -eq "1" })
 
 $summary = @"
-# Tencent Meeting History Export
+# 腾讯会议历史元数据导出
 
-- Total meetings: $($allMeetings.Count)
-- Meetings with AI summary flag: $($meetingsWithSummary.Count)
-- Metadata CSV: metadata/all_meetings.csv
+- 全部会议数: $($allMeetings.Count)
+- 带 AI 纪要标记的会议数: $($meetingsWithSummary.Count)
+- 元数据 CSV: metadata/all_meetings.csv
 
-This export contains local metadata only. Do not commit generated output if it includes real meeting subjects, meeting codes, or participant names.
+这个导出只包含本地会议元数据。如果生成结果里包含真实会议主题、会议号或参会人姓名，不要提交到公开仓库。
 "@
 
 Set-Content -LiteralPath (Join-Path $OutputRoot "README.md") -Value $summary -Encoding UTF8
-Write-Host "Exported $($allMeetings.Count) meeting metadata rows to $OutputRoot"
-
+Write-Host "已导出 $($allMeetings.Count) 条会议元数据到 $OutputRoot"

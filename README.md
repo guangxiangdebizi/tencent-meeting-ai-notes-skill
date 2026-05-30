@@ -1,18 +1,18 @@
-# Tencent Meeting AI Notes Skill
+# 腾讯会议元宝实时纪要提取 Skill
 
-Codex skill and Windows PowerShell tools for extracting Tencent Meeting Yuanbao real-time AI notes when the desktop client loads notes lazily and normal UI automation only captures part of the meeting.
+这是一个给 Codex 使用的 skill，同时附带 Windows PowerShell 脚本，用来从腾讯会议桌面客户端中提取“元宝纪要”的实时 AI 纪要。它主要解决一个实际问题：腾讯会议的元宝纪要是懒加载的，普通 UI 自动化经常只能拿到一部分内容，例如只导出 `15/29` 这类不完整结果。
 
-**Topics:** `codex-skill`, `tencent-meeting`, `yuanbao`, `meeting-notes`, `powershell`, `windows`, `cef`, `memory-extraction`, `ai-notes`
+**标签：** `codex-skill`, `tencent-meeting`, `yuanbao`, `meeting-notes`, `powershell`, `windows`, `cef`, `memory-extraction`, `ai-notes`
 
-## What It Does
+## 功能说明
 
-- Scrolls the Tencent Meeting Yuanbao notes page to trigger lazy loading.
-- Scans all local `wemeetapp` processes instead of relying on a single PID.
-- Extracts `note_info` fragments from renderer memory and formats them as Markdown.
-- Avoids stale hard-coded totals such as `15/29` by reporting the actual extracted count unless a verified expected count is provided.
-- Documents the failure modes that commonly cause incomplete real-time meeting notes.
+- 自动滚动腾讯会议元宝纪要页面，触发懒加载。
+- 扫描所有本地 `wemeetapp` 进程，不依赖单个固定 PID。
+- 从渲染进程内存中提取 `note_info` 片段，并整理成 Markdown。
+- 不再盲信 `15/29` 这类历史硬编码总数；除非传入已验证总数，否则只报告本次真实提取条数。
+- 记录实时纪要抽不全的常见原因，方便后续排查和复用。
 
-## Repository Layout
+## 仓库结构
 
 ```text
 .
@@ -28,18 +28,18 @@ Codex skill and Windows PowerShell tools for extracting Tencent Meeting Yuanbao 
 └── .gitignore
 ```
 
-## Requirements
+## 运行要求
 
 - Windows
-- Tencent Meeting desktop client
-- PowerShell 5.1 or newer
-- A Yuanbao notes page already opened in Tencent Meeting
+- 腾讯会议桌面客户端
+- PowerShell 5.1 或更新版本
+- 已经在腾讯会议中打开目标会议的“元宝纪要”页面
 
-The extractor reads memory from local `wemeetapp` processes. Some environments may require running PowerShell with sufficient permissions to read those processes.
+提取脚本会读取本地 `wemeetapp` 进程内存。某些环境下需要用有足够权限的 PowerShell 运行。
 
-## Quick Start
+## 快速开始
 
-Optionally export local meeting-history metadata from a Tencent Meeting SQLite database:
+可以先从腾讯会议本地 SQLite 数据库导出会议历史元数据：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\export_tencent_meeting_history.ps1 `
@@ -48,26 +48,28 @@ powershell -ExecutionPolicy Bypass -File .\scripts\export_tencent_meeting_histor
   -OutputRoot ".\output"
 ```
 
-Open the target meeting in Tencent Meeting, then open its Yuanbao notes page. Keep that page open.
+然后在腾讯会议里打开目标会议详情页，并进入该会议的“元宝纪要”页面。保持这个页面打开。
+
+先滚动加载：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\scroll_yuanbao_notes.ps1
 ```
 
-Then extract with explicit identifiers:
+再用明确的会议标识提取实时纪要：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\extract_yuanbao_realtime_notes.ps1 `
   -MeetingId "1234567890123456789" `
   -RoomId "123456789" `
   -MeetingStartTs "1770000000" `
-  -MeetingTitle "Example Meeting" `
+  -MeetingTitle "示例会议" `
   -MeetingTimeRange "2026-05-21 20:00 - 21:54" `
-  -Participants "Alice, Bob" `
+  -Participants "张三, 李四" `
   -OutputFile ".\output\example_realtime_notes.md"
 ```
 
-Only pass `-ExpectedNoteCount` if that number comes from the current page or current API response:
+只有当总条数来自当前页面或当前 API 响应时，才传入 `-ExpectedNoteCount`：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\extract_yuanbao_realtime_notes.ps1 `
@@ -77,16 +79,24 @@ powershell -ExecutionPolicy Bypass -File .\scripts\extract_yuanbao_realtime_note
   -ExpectedNoteCount 64
 ```
 
-## Why Tencent Meeting Notes Go Missing
+## 为什么会抽不全
 
-Yuanbao notes are loaded through an embedded Chromium view and cached in renderer memory. The full content may not exist in memory until the page is opened and scrolled. Incomplete exports often happen because a script scans the wrong process, scans before lazy loading finishes, closes a process handle too early, or trusts an old expected count.
+元宝纪要通过腾讯会议内嵌 Chromium 页面加载，内容会缓存到渲染进程内存中。完整内容不一定在页面打开时一次性进入内存，往往需要滚动页面后才会继续加载。
 
-This project bakes those lessons into the workflow: scroll first, scan every `wemeetapp` process, run multiple extraction passes, and write honest completeness metadata into the Markdown header.
+常见漏提原因包括：
 
-## Privacy
+- 页面没有真正打开到“元宝纪要”，只是停留在会议详情摘要页。
+- 页面打开了但没有滚到底，后面的片段没有进入内存。
+- 脚本只扫描了一个 `wemeetapp` PID，而真实数据在另一个渲染进程里。
+- 脚本提前关闭进程句柄，导致后续补扫逻辑失效。
+- 把旧的硬编码总数当成权威结果，例如误信 `15/29`。
 
-Do not commit real exported meeting notes. This repository intentionally ignores `output/`, Tencent Meeting export folders, local database files, and token-like artifacts. The included example is synthetic and sanitized.
+这个仓库把这些教训固化到流程里：先滚动，再扫描所有 `wemeetapp` 进程，执行多轮提取，并在 Markdown 头部写入诚实的提取状态。
 
-## License
+## 隐私说明
+
+不要提交真实导出的会议纪要。本仓库已经通过 `.gitignore` 排除了 `output/`、腾讯会议导出目录、本地数据库文件和常见纪要输出文件。仓库里的示例是合成的脱敏内容，不包含真实会议内容、会议号、用户 ID 或 token。
+
+## 许可证
 
 MIT
