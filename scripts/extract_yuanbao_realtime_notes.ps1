@@ -56,6 +56,24 @@ function Test-ReadableProtection {
     return $basicProtect -in @(0x02, 0x04, 0x08, 0x20, 0x40, 0x80)
 }
 
+function ConvertFrom-NoteInfoValue {
+    param([string]$Value)
+
+    return $Value -replace '\\n', "`n" -replace '\\t', "`t" -replace '\\"', '"' -replace '\\\\', '\' -replace '\*\*', ''
+}
+
+function Get-NoteQualityScore {
+    param([string]$Value)
+
+    $decoded = ConvertFrom-NoteInfoValue -Value $Value
+    $badCharCount = [regex]::Matches($decoded, '[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFD]').Count
+    $cjkCount = [regex]::Matches($decoded, '[\u4e00-\u9fff]').Count
+    $speakerMarkerCount = [regex]::Matches($decoded, '@@\(\d+\)@@').Count
+    $lengthScore = [Math]::Min($decoded.Length, 500)
+
+    return ($lengthScore + ($cjkCount * 4) + ($speakerMarkerCount * 5) - ($badCharCount * 200))
+}
+
 function Add-NoteFromContext {
     param(
         [string]$Context,
@@ -67,17 +85,46 @@ function Add-NoteFromContext {
         return $false
     }
 
-    $noteMatch = $noteInfoRegex.Match($Context)
-    if (-not $noteMatch.Success) {
+    $noteMatches = @($noteInfoRegex.Matches($Context))
+    if ($noteMatches.Count -eq 0) {
         return $false
     }
 
     $generatedTimestamp = $timestampMatch.Groups[1].Value
-    if ($allNotes.ContainsKey($generatedTimestamp)) {
+    $bestValue = $null
+    $bestScore = [double]::NegativeInfinity
+    $bestQuality = [double]::NegativeInfinity
+
+    foreach ($noteMatch in $noteMatches) {
+        $value = $noteMatch.Groups[1].Value
+        $quality = Get-NoteQualityScore -Value $value
+        $distancePenalty = if ($noteMatch.Index -le $timestampMatch.Index) {
+            [Math]::Min(($timestampMatch.Index - $noteMatch.Index) / 30, 250)
+        }
+        else {
+            500 + [Math]::Min(($noteMatch.Index - $timestampMatch.Index) / 30, 250)
+        }
+        $score = $quality - $distancePenalty
+        if ($score -gt $bestScore) {
+            $bestScore = $score
+            $bestQuality = $quality
+            $bestValue = $value
+        }
+    }
+
+    if ($null -eq $bestValue) {
         return $false
     }
 
-    $allNotes[$generatedTimestamp] = $noteMatch.Groups[1].Value
+    if ($allNotes.ContainsKey($generatedTimestamp)) {
+        $existingScore = Get-NoteQualityScore -Value $allNotes[$generatedTimestamp]
+        if ($bestQuality -gt $existingScore) {
+            $allNotes[$generatedTimestamp] = $bestValue
+        }
+        return $false
+    }
+
+    $allNotes[$generatedTimestamp] = $bestValue
     $passStats[$PassName]++
     return $true
 }
@@ -209,12 +256,12 @@ $formattedBlocks = @()
 $noteNumber = 1
 
 foreach ($entry in $sortedNotes) {
-    $decoded = $entry.Value -replace '\\n', "`n" -replace '\\t', "`t" -replace '\\"', '"' -replace '\\\\', '\'
-    $decoded = $decoded -replace '\*\*', ''
+    $decoded = ConvertFrom-NoteInfoValue -Value $entry.Value
     foreach ($uid in $UidMap.Keys) {
         $decoded = $decoded -replace "@@\($uid\)@@", $UidMap[$uid]
     }
     $decoded = $decoded -replace '@@\(\d+\)@@', ''
+    $decoded = $decoded -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFD]', ''
     $decoded = $decoded.Trim()
 
     $timestamp = [decimal]$entry.Key
