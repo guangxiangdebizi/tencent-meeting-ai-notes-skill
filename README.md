@@ -1,16 +1,19 @@
-# 腾讯会议元宝实时纪要提取 Skill
+# 腾讯会议元宝纪要导出 Skill
 
-这是一个给 Codex 使用的 skill，同时附带 Windows PowerShell 脚本，用来从腾讯会议桌面客户端中提取“元宝纪要”的实时 AI 纪要。它主要解决一个实际问题：腾讯会议的元宝纪要是懒加载的，普通 UI 自动化经常只能拿到一部分内容，例如只导出 `15/29` 这类不完整结果。
+这是一个给 Codex / Claude Code 等 agent 使用的 skill，附带 Windows 脚本，用来从腾讯会议桌面客户端导出“元宝纪要”：会后 AI 总结（含待办）和实时纪要片段，每场会议整理成一个 Markdown。
 
-**标签：** `codex-skill`, `tencent-meeting`, `yuanbao`, `meeting-notes`, `powershell`, `windows`, `cef`, `memory-extraction`, `ai-notes`
+**标签：** `codex-skill`, `claude-skill`, `tencent-meeting`, `yuanbao`, `meeting-notes`, `windows`, `memory-extraction`, `ai-notes`
 
-## 功能说明
+## 和旧版的区别
 
-- 自动滚动腾讯会议元宝纪要页面，触发懒加载。
-- 扫描所有本地 `wemeetapp` 进程，不依赖单个固定 PID。
-- 从渲染进程内存中提取 `note_info` 片段，并整理成 Markdown。
-- 不再盲信 `15/29` 这类历史硬编码总数；除非传入已验证总数，否则只报告本次真实提取条数。
-- 记录实时纪要抽不全的常见原因，方便后续排查和复用。
+旧版（v1）要先打开元宝纪要页面、自动滚动触发懒加载，再按会议号逐场提取，经常只抽到一部分。现在的做法：
+
+- **不用打开页面、不用滚动。** 腾讯会议客户端开着时，会把几个月内打开过的会议纪要都留在 `wemeetapp` 进程内存里。一次扫描全部进程，就能拿到所有会议。
+- **自动识别会议。** 从纪要的 `task_id` 里解析 meeting_id、房间号、开始时间、片段时间，会议主题从内存里的会议 URL 取，不用手动传参数。
+- **同时拿到会后总结和实时纪要。** `note_type=2` 是会后总结（完整版 + 简版，含“待办”小节），`note_type=1` 是实时纪要片段。`@@(uid)@@` 会替换成参会人昵称。
+- **界面兜底。** 新版客户端有时只把会后总结放在“元宝笔记”网页里，内存里找不到。`--ui-grab` 会打开“元宝笔记”窗口（或点“图文总结已生成”弹窗），用“复制为Markdown”取全文。动鼠标之前先确认没人在用电脑。
+- **适合日报类定时任务。** `--digest-since` 只列出某个时间之后有新纪要的会议和待办。
+- 已有的会议文件比新结果更完整时不覆盖（客户端重启后内存里可能只剩一部分）。
 
 ## 仓库结构
 
@@ -18,9 +21,9 @@
 .
 ├── SKILL.md
 ├── scripts/
-│   ├── extract_yuanbao_realtime_notes.ps1
-│   ├── export_tencent_meeting_history.ps1
-│   └── scroll_yuanbao_notes.ps1
+│   ├── wemeet_notes.py       # 入口：扫描、解析、合并、输出
+│   ├── wemeet_dump.ps1       # 扫描 wemeetapp 进程内存，导出 note_info（gzip）
+│   └── wemeet_ui_grab.py     # 界面兜底：元宝笔记窗口「复制为Markdown」
 ├── examples/
 │   └── sanitized-output.md
 ├── README.md
@@ -30,72 +33,61 @@
 
 ## 运行要求
 
-- Windows
-- 腾讯会议桌面客户端
+- Windows，腾讯会议桌面客户端正在运行
+- Python 3.9+（主流程只用标准库）
 - PowerShell 5.1 或更新版本
-- 已经在腾讯会议中打开目标会议的“元宝纪要”页面
-
-提取脚本会读取本地 `wemeetapp` 进程内存。某些环境下需要用有足够权限的 PowerShell 运行。
+- 只有用 `--ui-grab` 时才需要：`pip install pyautogui pyperclip pywin32`，并且有人登录着桌面
 
 ## 快速开始
 
-可以先从腾讯会议本地 SQLite 数据库导出会议历史元数据：
-
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\export_tencent_meeting_history.ps1 `
-  -DatabasePath "C:\path\to\WeMeet\Global\Database\your-profile.db" `
-  -SqliteExe "C:\path\to\sqlite3.exe" `
-  -OutputRoot ".\output"
+python scripts\wemeet_notes.py            # 扫描并打印最新一场会议的纪要
+python scripts\wemeet_notes.py --list     # 列出所有找得到纪要的会议
+python scripts\wemeet_notes.py --meeting <meeting_id>
+python scripts\wemeet_notes.py --digest-since 1770000000   # 某时间之后的新纪要 + 待办
 ```
 
-然后在腾讯会议里打开目标会议详情页，并进入该会议的“元宝纪要”页面。保持这个页面打开。
+结果写到 `.\output\`：
 
-先滚动加载：
+- `YYYY-MM-DD_<meeting_id>.md`：内存扫描得到的会议
+- `YYYY-MM-DD_ui_<会议号>.md`：界面抓取得到的会后总结
+- `raw/dump.jsonl.gz`：原始扫描结果
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\scroll_yuanbao_notes.ps1
+扫描大约需要几十秒。客户端以管理员权限运行时，扫描进程也要用管理员权限。
+
+### 远程 / agent 调用
+
+在 Windows 上扫描，把 `output\raw\dump.jsonl.gz` 拷到任意机器解析：
+
+```bash
+python3 scripts/wemeet_notes.py --dump dump.jsonl.gz --out ./output --list
 ```
 
-再用明确的会议标识提取实时纪要：
+通过 SSH 调用时点不到桌面窗口，界面兜底要用计划任务方式：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\extract_yuanbao_realtime_notes.ps1 `
-  -MeetingId "1234567890123456789" `
-  -RoomId "123456789" `
-  -MeetingStartTs "1770000000" `
-  -MeetingTitle "示例会议" `
-  -MeetingTimeRange "2026-05-21 20:00 - 21:54" `
-  -Participants "张三, 李四" `
-  -OutputFile ".\output\example_realtime_notes.md"
+python scripts\wemeet_notes.py --ui-grab task
 ```
 
-只有当总条数来自当前页面或当前 API 响应时，才传入 `-ExpectedNoteCount`：
+它会注册一个提权、交互式登录的计划任务 `wemeet-ui-grab`，在用户桌面里运行 `wemeet_ui_grab.py`，然后等结果。直接在桌面上的管理员终端里运行时用 `--ui-grab direct`。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\extract_yuanbao_realtime_notes.ps1 `
-  -MeetingId "1234567890123456789" `
-  -RoomId "123456789" `
-  -MeetingStartTs "1770000000" `
-  -ExpectedNoteCount 64
-```
+## 界面抓取的注意事项
 
-## 为什么会抽不全
+- 系统空闲不到 `--ui-idle` 秒（默认 300）时，先挂低级键鼠钩子观察 20 秒；有真人输入就放弃，返回 `owner_active`，下次再试。
+- 点击坐标是物理像素，按作者的电脑校准（`NOTE_RECT`、`COPY_ARROW`、`COPY_MD`、`TOAST_BTN`，在 `wemeet_ui_grab.py` 开头）。界面布局或显示缩放不同时需要重新量。
+- 弹窗按 Qt 窗口类名 `Qt680QWindowToolSaveBits` 查找，客户端升级 Qt 后可能要改。
+- 走不通的路：Ctrl+A 复制被网页拦截；网页文字没有暴露给 UI Automation；对主窗口做 UIA 全树遍历会卡死。
 
-元宝纪要通过腾讯会议内嵌 Chromium 页面加载，内容会缓存到渲染进程内存中。完整内容不一定在页面打开时一次性进入内存，往往需要滚动页面后才会继续加载。
+## 拿不到纪要的常见原因
 
-常见漏提原因包括：
-
-- 页面没有真正打开到“元宝纪要”，只是停留在会议详情摘要页。
-- 页面打开了但没有滚到底，后面的片段没有进入内存。
-- 脚本只扫描了一个 `wemeetapp` PID，而真实数据在另一个渲染进程里。
-- 脚本提前关闭进程句柄，导致后续补扫逻辑失效。
-- 把旧的硬编码总数当成权威结果，例如误信 `15/29`。
-
-这个仓库把这些教训固化到流程里：先滚动，再扫描所有 `wemeetapp` 进程，执行多轮提取，并在 Markdown 头部写入诚实的提取状态。
+- 腾讯会议没在运行，或刚重启过，还没加载过那场会议：在客户端里打开一次那场会议的元宝纪要。
+- 会议还没结束，只有实时纪要，没有会后总结。
+- 新版客户端的会后总结只在元宝笔记网页里：用 `--ui-grab`。
+- 扫描进程权限比 `wemeetapp` 低，读不到内存。
 
 ## 隐私说明
 
-不要提交真实导出的会议纪要。本仓库已经通过 `.gitignore` 排除了 `output/`、腾讯会议导出目录、本地数据库文件和常见纪要输出文件。仓库里的示例是合成的脱敏内容，不包含真实会议内容、会议号、用户 ID 或 token。
+脚本只读，不修改纪要和客户端数据。不要提交真实导出的会议纪要：`.gitignore` 已经排除 `output/`、dump 和常见纪要文件名。仓库里的示例是合成的脱敏内容。
 
 ## 许可证
 

@@ -1,95 +1,66 @@
 ---
 name: tencent-meeting-ai-notes
-description: Extract and package Tencent Meeting Yuanbao real-time AI notes from the Windows desktop client. Use when Codex needs to export Tencent Meeting history metadata, open or scroll Yuanbao notes, recover lazily loaded real-time note fragments from wemeetapp renderer memory, diagnose incomplete note extraction such as partial x/y counts, or produce clean Markdown meeting-minute artifacts without publishing private meeting content.
+description: Export Tencent Meeting (腾讯会议) Yuanbao AI notes — post-meeting summaries with to-dos and real-time note fragments — from the Windows desktop client into one Markdown file per meeting. Use when an agent needs to read what was said or decided in a Tencent Meeting, list recent meetings that have AI notes, collect new meeting to-dos for a daily digest, or recover a summary that only exists in the 元宝笔记 web view. Read-only; never publish real meeting content.
 ---
 
 # Tencent Meeting AI Notes
 
-Use this skill for Windows Tencent Meeting workflows where Yuanbao AI notes are visible in the desktop client but are incomplete through UI automation.
+The local Tencent Meeting database is encrypted, but a running `wemeetapp` client keeps the Yuanbao note JSON of every meeting it has loaded in recent months in process memory. `scripts/wemeet_notes.py` scans that memory, groups fragments by meeting, and writes Markdown. No page opening or scrolling is needed.
 
 ## Operating Rules
 
-1. Treat the local Tencent Meeting client as the source of truth.
-2. Never publish or commit real meeting notes, meeting IDs, room IDs, user IDs, tokens, client databases, or exported output directories.
-3. Prefer a two-stage extraction: load the Yuanbao page in the UI, then scan `wemeetapp` renderer memory.
-4. Do not trust a hard-coded expected note count unless it came from the current page or API response.
-5. If extraction returns fewer notes than expected, reopen the Yuanbao note page, scroll it fully, wait a few seconds, and run extraction again.
+1. The scripts are read-only. Never modify notes or client data.
+2. Never publish or commit real notes, dumps, meeting IDs, room IDs, user IDs or the `output/` directory.
+3. Run the memory scan with the same privilege level as `wemeetapp` (usually administrator).
+4. Only use `--ui-grab` when the memory scan has no summary for a meeting the user expects. It moves the mouse on the user's desktop; the script checks the user is away first and gives up with `owner_active` otherwise. Do not override that check.
 
 ## Workflow
 
-### 1. Open the target meeting
+### 1. Scan and list
 
-Optionally export meeting-history metadata first:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\export_tencent_meeting_history.ps1 `
-  -DatabasePath "<path-to-wemeet-profile-db>" `
-  -SqliteExe "<path-to-sqlite3.exe>" `
-  -OutputRoot ".\output"
-```
-
-In Tencent Meeting for Windows:
-
-1. Open the meeting history list.
-2. Search for the target meeting.
-3. Open its detail page.
-4. Open the Yuanbao notes page for that meeting.
-
-Keep the Yuanbao notes page open while extracting. The data must be loaded into the embedded Chromium renderer process before memory extraction can find it.
-
-### 2. Trigger lazy loading
-
-Run:
+On the Windows machine running Tencent Meeting:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\scroll_yuanbao_notes.ps1
+python scripts\wemeet_notes.py --list
 ```
 
-This focuses the Yuanbao notes window and sends repeated Page Down events. If the window is not found, ask the user to open the notes page manually and rerun the script.
+Each line is `start time, meeting_id, subject, counts (实时N 总结M), path`. Files go to `.\output\` (`--out` to change):
 
-### 3. Extract real-time notes
+- `YYYY-MM-DD_<meeting_id>.md`: from memory. Contains 会后总结（完整版）, 会后总结（简版） and 实时纪要 with in-meeting and Beijing timestamps.
+- `YYYY-MM-DD_ui_<code>.md`: from the UI fallback.
+- `raw/dump.jsonl.gz`: raw scan.
 
-Run the extractor with explicit meeting identifiers:
+An existing meeting file is kept when it is longer than the new result, because a restarted client may only hold part of a meeting.
+
+### 2. Read a meeting
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\extract_yuanbao_realtime_notes.ps1 `
-  -MeetingId "<meeting_id>" `
-  -RoomId "<room_id>" `
-  -MeetingStartTs "<unix_seconds>" `
-  -MeetingTitle "<title>" `
-  -MeetingTimeRange "<yyyy-mm-dd hh:mm - hh:mm>" `
-  -Participants "<names>" `
-  -OutputFile ".\output\meeting_realtime_notes.md"
+python scripts\wemeet_notes.py                    # latest meeting
+python scripts\wemeet_notes.py --meeting <id>     # a specific one
 ```
 
-Set `-ExpectedNoteCount` only when the count is verified from the current page or API response. Leave it unset when unsure.
+For a daily digest, `--digest-since <unix_ts>` prints only meetings with notes newer than that time, plus their 待办 items.
 
-### 4. Validate completeness
+Add `--no-refresh` to reuse the last dump. To parse on another machine, copy `raw/dump.jsonl.gz` and run `python3 scripts/wemeet_notes.py --dump dump.jsonl.gz --list`.
 
-Check the generated Markdown header:
+### 3. UI fallback for missing summaries
 
-- `纪要条数` should reflect the actual extracted count.
-- `提取状态` should say whether the run reached a verified expected count.
-- The first and last timestamps should match the real meeting range.
+Newer clients sometimes keep the post-meeting summary only in the 元宝笔记 web view, so memory has `总结0`. Then:
 
-If the output starts in the middle of the meeting or ends early, repeat the lazy-load step and rerun extraction. Tencent Meeting may evict or reload renderer memory.
+- On the user's desktop in an elevated terminal: `--ui-grab direct`.
+- Over SSH or from an agent session: `--ui-grab task`. This registers an elevated, interactive scheduled task `wemeet-ui-grab` that runs `wemeet_ui_grab.py` on the logged-in desktop and waits for its result.
 
-## Why Extraction Can Be Incomplete
+The grab uses an open 元宝笔记 window, or clicks 立即查看 on a 图文总结已生成 toast after confirming its text. It then chooses 复制为Markdown and reads the clipboard. Afterwards it restores the clipboard and foreground window and closes any window it opened. It needs `pip install pyautogui pyperclip pywin32`.
 
-Incomplete Yuanbao note exports usually come from one of these causes:
+Click coordinates in `wemeet_ui_grab.py` are physical pixels calibrated on the author's machine. If `copy_failed` comes back, take a screenshot of the 元宝笔记 window and re-measure `COPY_ARROW` / `COPY_MD`.
 
-1. The notes page was not open, so the renderer never loaded the API response.
-2. The page was open but not scrolled enough, so later fragments were never lazily loaded.
-3. A script scanned only one `wemeetapp` PID, while the data lived in another renderer process.
-4. A script closed a process handle before later scan passes used it.
-5. A stale hard-coded count such as `15/29` or `x/29` was treated as authoritative.
+## When Notes Are Missing
 
-The bundled extractor avoids these failure modes by scanning all `wemeetapp` processes, reopening handles per pass, scanning multiple cache patterns, and reporting actual extracted counts.
+- `腾讯会议没在运行`: start the client. A freshly started client only has meetings it has loaded since, so ask the user to open that meeting's 元宝纪要 once.
+- Meeting listed with `总结0`: the meeting may still be running, or the summary is web-only (use the UI fallback).
+- `owner_active`: someone is using the computer. Retry later.
+- Scan finds nothing although the client is running: the scan is probably not elevated.
 
 ## Privacy Checklist
 
-Before publishing, sharing, or committing outputs:
-
-- Remove `output/`, `腾讯会议整理输出/`, raw `.db` files, and any generated meeting minutes.
-- Remove concrete meeting IDs, room IDs, user IDs, account IDs, tokens, and company-sensitive content.
-- Use `examples/sanitized-output.md` style examples only.
+Before sharing anything, remove `output/`, dumps, meeting IDs, room IDs, user IDs and company-sensitive content. Use `examples/sanitized-output.md` for examples.

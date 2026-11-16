@@ -1,12 +1,15 @@
 output/
 腾讯会议整理输出/
+*.jsonl.gz
+ui_grab.json
+ui_grab.json.done
+ui_index.json
 *.db
 *.sqlite
 *.sqlite3
 *.log
 *_realtime_notes.md
 *_实时纪要.md
-yang_realtime_notes*.*
+__pycache__/
 .DS_Store
 Thumbs.db
-
