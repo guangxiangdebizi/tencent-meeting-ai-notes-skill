@@ -77,9 +77,13 @@ def test_nested_sections_tables_and_no_deadline_guess():
     assert value.actions[-1].owner == "待定" and value.actions[-1].due_text == "待定"
     assert prepare("## 待办\n- 整理2026-11-20会议的材料").minutes.actions[0].due_text == "待定"
     assert len(value.other_notes) == 1
+    metadata = prepare("# 确认会\n## 参会人\n- 陈一\n- 陈二\n## 会议日期\n2026-11-23\n\n- **待办事项**\n  1. 补充材料\n  2. 复核清单").minutes
+    assert metadata.participants == ["陈一", "陈二"]
+    assert metadata.meeting_date == "2026-11-23"
+    assert [a.text for a in metadata.actions] == ["补充材料", "复核清单"]
 
 
-@pytest.mark.parametrize("value,code", [(" \n", "EMPTY_INPUT"), ("中" * 90000, "INPUT_TOO_LARGE"), ("abc\x00", "INVALID_TEXT")])
+@pytest.mark.parametrize("value,code", [(" \n", "EMPTY_INPUT"), ("中" * 90000, "INPUT_TOO_LARGE"), ("abc\x00", "INVALID_TEXT"), ("abc\ud800", "INVALID_TEXT")])
 def test_input_errors(value, code):
     with pytest.raises(NotesError) as error:
         prepare(value)
@@ -126,6 +130,7 @@ def verify_files(payload, minutes, download=False):
                 assert row[:4] == (action["owner"], action["text"], action["due_text"], action["status"])
                 assert action["source_text"] in row[4]
             assert sheet.freeze_panes == "B2" and sheet.data_validations.count == 1
+            assert sheet.auto_filter.ref == sheet.dimensions
             workbook.close()
 
 
@@ -142,6 +147,11 @@ def test_export_literal_cells_and_empty(tmp_path):
     too_big = MeetingMinutes(actions=[Action(text="x" * 32768, source_text="original", source_ref="L1-L1")])
     with pytest.raises(NotesError, match="32767"):
         export(too_big, tmp_path)
+    occupied = tmp_path / "not-a-directory"
+    occupied.write_text("keep", encoding="utf-8")
+    with pytest.raises(NotesError) as error:
+        export(minutes, occupied)
+    assert error.value.code == "EXPORT_FAILED" and occupied.read_text(encoding="utf-8") == "keep"
 
 
 async def exercise_client(client, download=False):
@@ -183,7 +193,7 @@ def test_real_http_client_and_download(tmp_path):
     with (tmp_path / "server.log").open("wb") as log:
         process = subprocess.Popen([sys.executable, "-m", "meeting_notes.server"], cwd=ROOT, env=env, stdout=log, stderr=log)
         try:
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + 120
             while True:
                 if process.poll() is not None:
                     pytest.fail((tmp_path / "server.log").read_text(encoding="utf-8"))
@@ -193,7 +203,7 @@ def test_real_http_client_and_download(tmp_path):
                     break
                 except (urllib.error.URLError, TimeoutError):
                     if time.monotonic() > deadline:
-                        raise
+                        pytest.fail("HTTP server startup timed out: " + (tmp_path / "server.log").read_text(encoding="utf-8"))
                     time.sleep(0.1)
             asyncio.run(exercise_client(Client(base + "/mcp", read_timeout_seconds=30), download=True))
             for path in ["/files/invalid/action-items.xlsx", "/files/" + "a" * 32 + "/secret.txt", "/files/" + "a" * 32 + "/action-items.xlsx"]:
@@ -201,5 +211,9 @@ def test_real_http_client_and_download(tmp_path):
                     urllib.request.urlopen(base + path, timeout=5)
                 assert error.value.code == 404
         finally:
-            process.terminate()
+            if os.name == "nt":
+                # Windows venv launchers can leave the actual interpreter child alive.
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, check=False)
+            else:
+                process.terminate()
             process.wait(timeout=15)

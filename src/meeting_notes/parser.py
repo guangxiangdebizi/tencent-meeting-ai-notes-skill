@@ -59,10 +59,10 @@ def iso_date(value: str) -> str | None:
 
 
 def check_size(value: str) -> None:
-    if len(value.encode("utf-8")) > MAX_BYTES:
-        raise NotesError("INPUT_TOO_LARGE", "输入超过 256 KiB。", "拆分为单场会议或缩短原文。")
     if re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]", value):
         raise NotesError("INVALID_TEXT", "输入含 Office 文件不支持的控制字符。", "移除控制字符后重试。")
+    if len(value.encode("utf-8")) > MAX_BYTES:
+        raise NotesError("INPUT_TOO_LARGE", "输入超过 256 KiB。", "拆分为单场会议或缩短原文。")
 
 
 def parse_action(item: Evidence) -> Action:
@@ -102,6 +102,8 @@ def parse_action(item: Evidence) -> Action:
 
 def prepare(text: str, title: str | None = None, meeting_date: str | None = None) -> Prepared:
     check_size(text)
+    if title:
+        check_size(title)
     if not text.strip():
         raise NotesError("EMPTY_INPUT", "会议原文为空。", "粘贴元宝笔记、腾讯会议文本或 Markdown。")
     if meeting_date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", meeting_date):
@@ -133,6 +135,9 @@ def prepare(text: str, title: str | None = None, meeting_date: str | None = None
     def add(value: str, start: int, end: int, forced: str | None = None) -> None:
         value = plain(value)
         if not value or metadata(value):
+            return
+        if forced is None and headings and any(key(headings[-1][1]) in labels for labels in META.values()):
+            metadata(f"{headings[-1][1]}：{value}")
             return
         kind = forced or (headings[-1][2] if headings else None) or "other_notes"
         item = Evidence(text=value, source_ref=f"L{start + 1}-L{end}",
@@ -203,9 +208,10 @@ def prepare(text: str, title: str | None = None, meeting_date: str | None = None
             value = "\n".join(inline)
             # A list item may introduce an explicitly labelled section.
             label = re.match(r"^([^:：\n]+)[:：]\s*(.*)$", plain(inline[0]) if inline else "")
-            if label and section_kind(label[1]):
-                forced = section_kind(label[1])
-                children = inline[1:] if not label[2] else [label[2], *inline[1:]]
+            if (label and section_kind(label[1])) or (inline and section_kind(inline[0])):
+                forced = section_kind(label[1]) if label else section_kind(inline[0])
+                headings = [(2, plain(label[1]) if label else plain(inline[0]), forced)]
+                children = inline[1:] if not label or not label[2] else [label[2], *inline[1:]]
                 for child in children:
                     add(child, token.map[0], token.map[1], forced)
             else:
@@ -225,7 +231,7 @@ def prepare(text: str, title: str | None = None, meeting_date: str | None = None
             value = tokens[i + 1].content
             kind = section_kind(value)
             label = re.match(r"^([^:：\n]+)[:：]\s*(.+)$", plain(value), re.S)
-            if kind:
+            if kind or any(key(value) in labels for labels in META.values()):
                 headings = [(2, plain(value).strip(" :："), kind)]
             elif label and section_kind(label[1]):
                 headings = [(2, plain(label[1]), section_kind(label[1]))]

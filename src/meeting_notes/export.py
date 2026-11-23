@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -13,22 +14,21 @@ from docx.shared import Cm, Pt, RGBColor
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
-from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .models import Artifact, Exported, MeetingMinutes
 from .parser import NotesError, check_size
 
 
 def validate_minutes(minutes: MeetingMinutes) -> None:
-    value = json.dumps(minutes.model_dump(), ensure_ascii=False)
-    # Source quotations and display text both count; never silently truncate an export.
-    if len(value.encode("utf-8")) > 2 * 1024 * 1024:
-        raise NotesError("INPUT_TOO_LARGE", "单场结构化纪要超过 2 MiB。", "将超长会议拆成较小的纪要。")
     for text in [minutes.title, minutes.meeting_date, *minutes.participants,
                  *(v for group in [minutes.topics, minutes.decisions, minutes.actions, minutes.unresolved, minutes.other_notes]
                    for item in group for v in item.model_dump().values())]:
         if isinstance(text, str):
             check_size(text)
+    value = json.dumps(minutes.model_dump(), ensure_ascii=False)
+    # Source quotations and display text both count; never silently truncate an export.
+    if len(value.encode("utf-8")) > 2 * 1024 * 1024:
+        raise NotesError("INPUT_TOO_LARGE", "单场结构化纪要超过 2 MiB。", "将超长会议拆成较小的纪要。")
     for action in minutes.actions:
         if any(len(str(v)) > 32767 for v in action.model_dump().values()) or len(action.source_ref) + len(action.source_text) + 1 > 32767:
             raise NotesError("CELL_TOO_LARGE", "待办或原文依据超过 XLSX 单元格 32767 字符上限。", "拆分该待办及其依据后重试。")
@@ -129,12 +129,10 @@ def write_xlsx(minutes: MeetingMinutes, target: Path) -> None:
                              str(c.value or "").count("\n") + 1) for c, width in zip(row, [9, 26, 12, 7, 36]))
         sheet.row_dimensions[row[0].row].height = min(300, max(42, line_count * 18))
         for c in row:
+            if c.row % 2 == 0:
+                c.fill = PatternFill("solid", fgColor="EAF0F7")
             if c.value == "待定":
                 c.fill = PatternFill("solid", fgColor="FFF2CC")
-    if minutes.actions:
-        table = Table(displayName="MeetingActions", ref=sheet.dimensions)
-        table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
-        sheet.add_table(table)
     statuses = DataValidation(type="list", formula1='"待办,进行中,已完成,待定"')
     statuses.errorTitle, statuses.error = "请选择状态", "状态必须来自下拉列表。"
     statuses.showErrorMessage = True
@@ -169,9 +167,10 @@ def export(minutes: MeetingMinutes, output_dir: Path, public_base_url: str | Non
                                   downloadUrl=f"{public_base_url.rstrip('/')}/files/{folder.name}/{filename}" if public_base_url else None))
     except (OSError, ValueError) as exc:
         # Only remove files owned by this failed export, never a caller-specified path.
-        for name in ["meeting-minutes.docx", "action-items.xlsx"]:
-            (folder / name).unlink(missing_ok=True)
-        if folder.exists():
-            folder.rmdir()
+        if folder.is_dir():
+            with suppress(OSError):
+                for name in ["meeting-minutes.docx", "action-items.xlsx"]:
+                    (folder / name).unlink(missing_ok=True)
+                folder.rmdir()
         raise NotesError("EXPORT_FAILED", "无法写入会议产物。", "检查 OUTPUT_DIR 的写权限和剩余空间后重试。") from exc
     return Exported(files=files, action_count=len(minutes.actions))

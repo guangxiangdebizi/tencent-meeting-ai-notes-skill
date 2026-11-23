@@ -14,7 +14,7 @@ attrs==26.1.0
     #   referencing
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
-click==8.5.1 ; sys_platform != 'emscripten'
+click==8.5.1
     # via uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
     # via pytest
@@ -22,7 +22,7 @@ cryptography==50.0.2
     # via pyjwt
 et-xmlfile==2.0.0
     # via openpyxl
-h11==0.16.0 ; sys_platform != 'emscripten'
+h11==0.16.0
     # via
     #   httpcore2
     #   uvicorn
@@ -64,6 +64,7 @@ pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementati
     # via cffi
 pydantic==2.14.4
     # via
+    #   tencent-meeting-ai-notes-skill (pyproject.toml)
     #   mcp
     #   mcp-types
 pydantic-core==2.50.5
@@ -92,6 +93,7 @@ sse-starlette==3.7.1
     # via mcp
 starlette==1.10.0
     # via
+    #   tencent-meeting-ai-notes-skill (pyproject.toml)
     #   mcp
     #   sse-starlette
 truststore==0.10.5 ; sys_platform != 'emscripten'
@@ -115,5 +117,7 @@ typing-inspection==0.4.5
     # via
     #   mcp
     #   pydantic
-uvicorn==0.54.0 ; sys_platform != 'emscripten'
-    # via mcp
+uvicorn==0.54.0
+    # via
+    #   tencent-meeting-ai-notes-skill (pyproject.toml)
+    #   mcp
