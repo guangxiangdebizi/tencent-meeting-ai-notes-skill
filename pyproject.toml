@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tencent-meeting-ai-notes-skill"
+version = "3.0.0"
+description = "Stateless MCP tools for evidence-backed meeting minutes and Office exports"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{name = "Xingyu Chen"}]
+dependencies = [
+  "mcp==2.3.0",
+  "markdown-it-py>=3.0,<5",
+  "python-docx>=1.1,<2",
+  "openpyxl>=3.1,<4",
+]
+
+[project.urls]
+Repository = "https://github.com/guangxiangdebizi/tencent-meeting-ai-notes-skill"
+
+[project.scripts]
+meeting-notes-mcp = "meeting_notes.server:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meeting_notes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
