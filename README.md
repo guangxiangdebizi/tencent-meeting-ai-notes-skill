@@ -1,94 +1,172 @@
-# 腾讯会议元宝纪要导出 Skill
+# 腾讯会议纪要：从笔记到行动表
+粘贴元宝笔记、腾讯会议纪要文本或 Markdown，得到规范纪要、DOCX 和 XLSX 待办表。
+跨平台、无状态，不保存会议历史；无需腾讯 Token 或模型 Key。
 
-这是一个给 Codex / Claude Code 等 agent 使用的 skill，附带 Windows 脚本，用来从腾讯会议桌面客户端导出“元宝纪要”：会后 AI 总结（含待办）和实时纪要片段，每场会议整理成一个 Markdown。
+[English](README.en.md) · [Agent Skill](SKILL.md) · [完整输入样例](examples/yuanbao-weekly.md)
 
-**标签：** `codex-skill`, `claude-skill`, `tencent-meeting`, `yuanbao`, `meeting-notes`, `windows`, `memory-extraction`, `ai-notes`
+## 一次交付什么
 
-## 和旧版的区别
+| 工具 | 输入 | 返回 |
+|---|---|---|
+| `prepare_meeting_notes` | `text`，可选 `title`、`meeting_date` | `minutes` 结构化结果、规范 `markdown`、`warnings` |
+| `export_meeting_minutes` | 上一步的 `minutes` 对象 | DOCX 公司会议纪要、XLSX 待办跟踪表；每个文件有 `path`、`downloadUrl`、`bytes`、`sha256` |
+| `merge_action_items` | 当前对话的 `meetings: [minutes, ...]`，可选 `week_start`、`owner` | 按负责人和日期分组的周行动表、Markdown |
 
-旧版（v1）要先打开元宝纪要页面、自动滚动触发懒加载，再按会议号逐场提取，经常只抽到一部分。现在的做法：
+所有工具声明输入和输出 JSON Schema，成功响应包含 `structuredContent` 和一句摘要。MCP Python SDK **2.3.0** 是 2026-11-23 在 PyPI 核实的稳定版，已锁定；使用官方高层 `MCPServer`，即旧 FastMCP 的 v2 API，非第三方 `fastmcp` 包。参见 [官方安装说明](https://github.com/modelcontextprotocol/python-sdk#installation) 和 [结构化输出文档](https://py.sdk.modelcontextprotocol.io/servers/structured-output/)。
 
-- **不用打开页面、不用滚动。** 腾讯会议客户端开着时，会把几个月内打开过的会议纪要都留在 `wemeetapp` 进程内存里。一次扫描全部进程，就能拿到所有会议。
-- **自动识别会议。** 从纪要的 `task_id` 里解析 meeting_id、房间号、开始时间、片段时间，会议主题从内存里的会议 URL 取，不用手动传参数。
-- **同时拿到会后总结和实时纪要。** `note_type=2` 是会后总结（完整版 + 简版，含“待办”小节），`note_type=1` 是实时纪要片段。`@@(uid)@@` 会替换成参会人昵称。
-- **界面兜底。** 新版客户端有时只把会后总结放在“元宝笔记”网页里，内存里找不到。`--ui-grab` 会打开“元宝笔记”窗口（或点“图文总结已生成”弹窗），用“复制为Markdown”取全文。动鼠标之前先确认没人在用电脑。
-- **适合日报类定时任务。** `--digest-since` 只列出某个时间之后有新纪要的会议和待办。
-- 已有的会议文件比新结果更完整时不覆盖（客户端重启后内存里可能只剩一部分）。
+## 真实运行样例
 
-## 仓库结构
+仓库样例均为合成脱敏内容。以下结果由真实 MCP Client 调用生成。
 
-```text
-.
-├── SKILL.md
-├── scripts/
-│   ├── wemeet_notes.py       # 入口：扫描、解析、合并、输出
-│   ├── wemeet_dump.ps1       # 扫描 wemeetapp 进程内存，导出 note_info（gzip）
-│   └── wemeet_ui_grab.py     # 界面兜底：元宝笔记窗口「复制为Markdown」
-├── examples/
-│   └── sanitized-output.md
-├── README.md
-├── LICENSE
-└── .gitignore
+粘贴 [examples/yuanbao-weekly.md](examples/yuanbao-weekly.md) 中的笔记，例如其中的待办段：
+
+```markdown
+## 待办
+
+- [ ] 张三：周五前整理客户演示脚本
+1. 李四：下周一前给出配置页面原型
+- [x] 更新验收清单
+  - 负责人：王五
+  - 期限：2026-11-24
+- 整理未关闭问题清单
 ```
 
-## 运行要求
+整理得到标题、日期、参会人、3 条议题小结、2 条决策、4 条待办和 1 条未决问题。[完整纪要](docs/minutes.md) · [结构化 JSON](docs/prepared.json) · [跨会周行动表](docs/weekly-actions.md)
 
-- Windows，腾讯会议桌面客户端正在运行
-- Python 3.9+（主流程只用标准库）
-- PowerShell 5.1 或更新版本
-- 只有用 `--ui-grab` 时才需要：`pip install pyautogui pyperclip pywin32`，并且有人登录着桌面
+| 负责人 | 事项 | 期限 | 状态 |
+|---|---|---|---|
+| 张三 | 整理客户演示脚本 | 周五前 | 待办 |
+| 李四 | 给出配置页面原型 | 下周一前 | 待办 |
+| 王五 | 更新验收清单 | 2026-11-24 | 已完成 |
+| 待定 | 整理未关闭问题清单 | 待定 | 待办 |
 
-## 快速开始
+[下载示例 DOCX](docs/meeting-minutes.docx) · [下载示例 XLSX](docs/action-items.xlsx)
 
-```powershell
-python scripts\wemeet_notes.py            # 扫描并打印最新一场会议的纪要
-python scripts\wemeet_notes.py --list     # 列出所有找得到纪要的会议
-python scripts\wemeet_notes.py --meeting <meeting_id>
-python scripts\wemeet_notes.py --digest-since 1770000000   # 某时间之后的新纪要 + 待办
-```
+下图是上述 XLSX 在 Microsoft Excel 中导出 PDF 后的页面截图，直接来自实际生成文件。
 
-结果写到 `.\output\`：
+![实际生成的 XLSX 待办跟踪表](docs/action-items.png)
 
-- `YYYY-MM-DD_<meeting_id>.md`：内存扫描得到的会议
-- `YYYY-MM-DD_ui_<会议号>.md`：界面抓取得到的会后总结
-- `raw/dump.jsonl.gz`：原始扫描结果
+## 五分钟启动
 
-扫描大约需要几十秒。客户端以管理员权限运行时，扫描进程也要用管理员权限。
-
-### 远程 / agent 调用
-
-在 Windows 上扫描，把 `output\raw\dump.jsonl.gz` 拷到任意机器解析：
+Python **3.10+**，建议 3.12。Linux、macOS、Windows 使用同一云端服务，不安装桌面采集依赖。
 
 ```bash
-python3 scripts/wemeet_notes.py --dump dump.jsonl.gz --out ./output --list
+python -m venv .venv
+# Linux / macOS
+source .venv/bin/activate
+# Windows PowerShell 改用：.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.lock
+python -m pip install --no-deps .
+python scripts/generate_examples.py
 ```
 
-通过 SSH 调用时点不到桌面窗口，界面兜底要用计划任务方式：
+最后一条命令通过真实 stdio MCP Client 完成整理、合并、导出，成品写到 `output/example/`。依赖锁包含测试依赖；用 `pip install .` 也可安装服务。入口为 `meeting-notes-mcp` 或 `python -m meeting_notes.server`。
+
+### stdio 接入
+
+将解释器和输出目录改为部署机的绝对路径。stdio 的 stdout 只输出 MCP 协议。
+
+```json
+{
+  "mcpServers": {
+    "tencent-meeting-notes": {
+      "command": "/absolute/path/.venv/bin/python",
+      "args": ["-m", "meeting_notes.server"],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "OUTPUT_DIR": "/absolute/path/meeting-output"
+      }
+    }
+  }
+}
+```
+
+Windows 的 `command` 示例：`D:\\tools\\meeting-notes\\.venv\\Scripts\\python.exe`。
+
+### 无状态 Streamable HTTP
+
+Linux / macOS：
+
+```bash
+MCP_TRANSPORT=http PORT=8000 OUTPUT_DIR=./output PUBLIC_BASE_URL=http://localhost:8000 meeting-notes-mcp
+```
+
+Windows PowerShell：
 
 ```powershell
-python scripts\wemeet_notes.py --ui-grab task
+$env:MCP_TRANSPORT="http"
+$env:PORT="8000"
+$env:OUTPUT_DIR="./output"
+$env:PUBLIC_BASE_URL="http://localhost:8000"
+meeting-notes-mcp
 ```
 
-它会注册一个提权、交互式登录的计划任务 `wemeet-ui-grab`，在用户桌面里运行 `wemeet_ui_grab.py`，然后等结果。直接在桌面上的管理员终端里运行时用 `--ui-grab direct`。
+连接配置：
 
-## 界面抓取的注意事项
+```json
+{"mcpServers":{"tencent-meeting-notes":{"url":"http://localhost:8000/mcp"}}}
+```
 
-- 系统空闲不到 `--ui-idle` 秒（默认 300）时，先挂低级键鼠钩子观察 20 秒；有真人输入就放弃，返回 `owner_active`，下次再试。
-- 点击坐标是物理像素，按作者的电脑校准（`NOTE_RECT`、`COPY_ARROW`、`COPY_MD`、`TOAST_BTN`，在 `wemeet_ui_grab.py` 开头）。界面布局或显示缩放不同时需要重新量。
-- 弹窗按 Qt 窗口类名 `Qt680QWindowToolSaveBits` 查找，客户端升级 Qt 后可能要改。
-- 走不通的路：Ctrl+A 复制被网页拦截；网页文字没有暴露给 UI Automation；对主窗口做 UIA 全树遍历会卡死。
+健康检查 `GET /health`；产物下载 `GET /files/<随机id>/<文件名>`。每次导出使用独立随机目录，不覆盖前次文件。未配置 `PUBLIC_BASE_URL` 时 `downloadUrl` 为 null，仍返回本机路径。
 
-## 拿不到纪要的常见原因
+### 容器与库库平台封装
 
-- 腾讯会议没在运行，或刚重启过，还没加载过那场会议：在客户端里打开一次那场会议的元宝纪要。
-- 会议还没结束，只有实时纪要，没有会后总结。
-- 新版客户端的会后总结只在元宝笔记网页里：用 `--ui-grab`。
-- 扫描进程权限比 `wemeetapp` 低，读不到内存。
+```bash
+docker build -t tencent-meeting-notes:3 .
+docker run --rm -p 8000:8000 -e PUBLIC_BASE_URL=http://localhost:8000 tencent-meeting-notes:3
+```
 
-## 隐私说明
+生产环境由网关提供 HTTPS、认证和请求限额，同时保护 `/mcp` 与 `/files/`。容器以非 root 用户运行；需要保留文件时挂载可写卷到 `/app/output`。
 
-脚本只读，不修改纪要和客户端数据。不要提交真实导出的会议纪要：`.gitignore` 已经排除 `output/`、dump 和常见纪要文件名。仓库里的示例是合成的脱敏内容。
+| 环境变量 | 默认 | 用途 |
+|---|---|---|
+| `MCP_TRANSPORT` | `stdio` | `stdio` 或 `http` |
+| `HOST` | `127.0.0.1` | HTTP 监听地址；容器默认 `0.0.0.0` |
+| `PORT` | `8000` | HTTP 端口 |
+| `OUTPUT_DIR` | `./output` | 导出目录；容器为 `/app/output` |
+| `PUBLIC_BASE_URL` | 未设置 | 对外基础 URL；支持代理路径前缀，返回下载链接并允许对应 Host |
+| `ALLOWED_HOSTS` | 本机及 PUBLIC_BASE_URL | 额外允许的 HTTP Host，逗号分隔，可含端口 |
+
+平台 agent 将用户选择的附件读成 UTF-8 文本后传给整理工具。工具不接受任意路径、URL、会议账号或宿主身份。无外部网络调用、模型调用、数据库或跨会话查询。只有导出工具写 Office 产物；平台负责输出卷的保留期限和到期清理，不提供删除工具。
+
+## 解析与合并规则
+
+- 识别元宝概览、议题小结、决策、待办和未决问题，以及旧脚本的会后总结/实时纪要章节。支持有序、无序、勾选、嵌套列表和待办 Markdown 表格。
+- 只从明确决策/待办栏目抽取。未分类段落保留在 `other_notes`，不做语义扩写。每条记录附 `source_ref` 原文行号、`source_text` 原句及栏目路径。
+- 支持“张三：周五前整理脚本”的负责人前缀，以及 `负责人：`、`期限：`、`状态：` 字段；负责人前缀用于派工，不用于一般主题标签。未写负责人或期限统一为“待定”。会议号等旧脚本元数据不进入交付稿。
+- `minutes` 包含 `title`、`meeting_date`、`participants`、`topics`、`decisions`、`actions`、`unresolved`、`other_notes`。不从待办负责人反推参会人。
+- 相对期限原样保留。合并时，仅以明确会议日期计算今天、明天、后天、周一至周日、下周和下下周；无前缀的“周五”指会议所在周周五，不自动移到下一周。
+- `week_start` 必须是周一，按确定的待办期限筛选该周，日期待定项仍保留。`owner` 精确匹配。不同会议中的同文待办保留；完全相同的整场重复输入只计一次，不猜测任务已完成或被撤销。
+- 原文上限 256 KiB；单场结构化导出上限 2 MiB；XLSX 单元格上限 32767 字符。超限拒绝，不截断。公式形式的笔记写为纯文本。
+
+工具业务错误返回 `isError=true`，附 `code`、`message`、`next_action`、`retryable`，例如 `EMPTY_INPUT`、`INPUT_TOO_LARGE`、`INVALID_DATE`、`INVALID_TEXT`、`CELL_TOO_LARGE`、`EXPORT_FAILED`。不符合 Schema 的参数由 SDK 校验并返回工具错误。
+
+## 实测
+
+```bash
+python -m pytest -q
+```
+
+测试实际启动 stdio 和 HTTP 子进程，用官方 MCP Client 列出工具并调用三个核心工具，读回 DOCX/XLSX，核对下载字节、SHA-256、混合列表、原文依据、缺失字段、跨会日期与重复输入。不需要腾讯账号、模型 Key 或 Office。Excel 仅用于制作上面的真实页面截图。
+
+## 本机模式（Windows）
+
+原有 `scripts/wemeet_notes.py`、`wemeet_dump.ps1`、`wemeet_ui_grab.py` 保留，不注册为云端 MCP 工具。
+
+```powershell
+python scripts\wemeet_notes.py --list
+python scripts\wemeet_notes.py --meeting <meeting_id>
+```
+
+本机采集要求腾讯会议客户端和相应进程权限；UI 兜底另需桌面、采集依赖与用户授权。完整命令、离线 dump 解析和版本限制见 [Windows 本机指南](docs/windows-local.md)。
+
+## 局限
+
+- 工具整理已有笔记，不从录音恢复遗漏内容，也不替 agent 对自由散文做语义总结。
+- 月底、无年份的月日等含糊期限保留原话，周表归入日期待定。
+- 本机脚本未在本次操作用户的真实会议，客户端升级可能改变采集效果。
+- Docker 镜像需部署方有运行中的引擎；本次跨平台验证使用无桌面的 WSL Linux 环境。
 
 ## 许可证
 
-MIT
+MIT，沿用仓库原许可证。
